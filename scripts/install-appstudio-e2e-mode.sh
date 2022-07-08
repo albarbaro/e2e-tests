@@ -114,10 +114,10 @@ function setupMCEOperator() {
     spec: {}
     " | oc apply -f - 
 
-    while $(oc get mce  -o=jsonpath='{.items[0].status.phase}') != 'Available' ; do
-        echo 'Waiting for MCE to be available...'
-        sleep 10
-    done
+    echo "Waiting for MCE to be ready..."
+
+    # TBD: need write a proper check to check for multiclusterengines crd availability or next command will fail
+    sleep 300
 
     oc project default
 
@@ -132,7 +132,7 @@ function onboardManagedHubCluster() {
     # get the kubeconfig of the managed hub cluster and 
     # create the secret in the appstudio cluster using the managed hub cluster kubeconfig 
     # NOTE: this script deploys MCE and AppStudio on the same cluster
-    oc create secret generic hub-kubeconfig --from-file=kubeconfig=$KUBECONFIG -n open-cluster-management
+    oc create secret generic hub-kubeconfig --from-file=kubeconfig=$KUBECONFIG -n cluster-reg-config
     echo "created secret hub-kubeconfig from kubeconfig file"
 }
 
