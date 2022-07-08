@@ -114,11 +114,14 @@ function setupMCEOperator() {
     spec: {}
     " | oc apply -f - 
 
-    echo "Waiting for MCE to be ready..."
-
     # TBD: need write a proper check to check for multiclusterengines crd availability or next command will fail
-    sleep 300
 
+    while (( $(oc get crd | grep -c multiclusterengines) == 0 )); do
+      echo "Waiting for MCE to be ready..."
+      sleep 15
+    done
+    echo "MulticlusterEngine CRD available now."
+    sleep 15
     oc project default
 
 }
