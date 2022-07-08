@@ -39,3 +39,6 @@ func IntegrationServiceSuiteDescribe(text string, body func()) bool {
 	return Describe("[integration-service-suite "+text+"]", Ordered, body)
 }
 
+func SingaporeSuiteDescribe(text string, body func()) bool {
+	return Describe("[singapore-suite "+text+"]", Ordered, body)
+}

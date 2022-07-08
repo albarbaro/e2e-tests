@@ -7,21 +7,23 @@ import (
 	"github.com/redhat-appstudio/e2e-tests/pkg/utils/common"
 	"github.com/redhat-appstudio/e2e-tests/pkg/utils/gitops"
 	"github.com/redhat-appstudio/e2e-tests/pkg/utils/has"
-	"github.com/redhat-appstudio/e2e-tests/pkg/utils/release"
 	"github.com/redhat-appstudio/e2e-tests/pkg/utils/integration"
+	"github.com/redhat-appstudio/e2e-tests/pkg/utils/release"
+	"github.com/redhat-appstudio/e2e-tests/pkg/utils/singapore"
 	"github.com/redhat-appstudio/e2e-tests/pkg/utils/spi"
 	"github.com/redhat-appstudio/e2e-tests/pkg/utils/tekton"
 )
 
 // Framework struct to store all controllers
 type Framework struct {
-	HasController     *has.SuiteController
-	CommonController  *common.SuiteController
-	TektonController  *tekton.SuiteController
-	GitOpsController  *gitops.SuiteController
-	SPIController     *spi.SuiteController
-	ReleaseController *release.SuiteController
+	HasController         *has.SuiteController
+	CommonController      *common.SuiteController
+	TektonController      *tekton.SuiteController
+	GitOpsController      *gitops.SuiteController
+	SPIController         *spi.SuiteController
+	ReleaseController     *release.SuiteController
 	IntegrationController *integration.SuiteController
+	SingaporeController   *singapore.SuiteController
 }
 
 // Initialize all test controllers and return them in a Framework
@@ -75,13 +77,20 @@ func NewFramework() (*Framework, error) {
 		return nil, err
 	}
 
+	// Initialize Singapore Gateway controller
+	singaporeController, err := singapore.NewSuiteController(kubeClient)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Framework{
-		CommonController:  commonCtrl,
-		HasController:     hasController,
-		TektonController:  tektonController,
-		GitOpsController:  gitopsController,
-		SPIController:     spiController,
-		ReleaseController: releaseController,
+		CommonController:      commonCtrl,
+		HasController:         hasController,
+		TektonController:      tektonController,
+		GitOpsController:      gitopsController,
+		SPIController:         spiController,
+		ReleaseController:     releaseController,
 		IntegrationController: integrationController,
+		SingaporeController:   singaporeController,
 	}, nil
 }

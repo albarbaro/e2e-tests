@@ -65,6 +65,181 @@ function createApplicationServiceSecrets() {
     rm docker.config
 }
 
+# Setup Sandbox Operator
+function setupSandboxOperator() {
+    cd "$WORKSPACE"/tmp/infra-deployments
+    /bin/bash hack/sandbox-development-mode.sh
+    cd "$WORKSPACE"
+}
+
+# Setup MultiClusterEngine Operator
+function setupMCEOperator() {
+    oc create namespace open-cluster-management
+    oc project open-cluster-management
+    echo "---
+    apiVersion: operators.coreos.com/v1
+    kind: OperatorGroup
+    metadata:
+      name: open-cluster-management
+    spec:
+      targetNamespaces:
+        - open-cluster-management
+    " | oc apply -f - 
+
+    echo "---
+    apiVersion: operators.coreos.com/v1alpha1
+    kind: Subscription
+    metadata:
+      name: acm-operator-subscription
+    spec:
+      sourceNamespace: openshift-marketplace
+      source: redhat-operators
+      channel: release-2.5
+      installPlanApproval: Automatic
+      name: advanced-cluster-management
+    " | oc apply -f - 
+
+    echo "Waiting 30 seconds before creating the MultiClusterHub..."
+    sleep 30 
+    while $(oc get subs -n open-cluster-management -o=jsonpath='{.items[0].status.conditions[?(@.type=="CatalogSourcesUnhealthy")].status}') != 'False' ; do
+        echo '.'
+        sleep 10
+    done
+    
+    echo "---
+    apiVersion: operator.open-cluster-management.io/v1
+    kind: MultiClusterHub
+    metadata:
+      name: multiclusterhub
+    spec: {}
+    " | oc apply -f - 
+
+    while $(oc get mce  -o=jsonpath='{.items[0].status.phase}') != 'Available' ; do
+        echo 'Waiting for MCE to be available...'
+        sleep 10
+    done
+
+    oc project default
+
+}
+
+# create the secret needed to onboard a managed hub cluster
+function onboardManagedHubCluster() {
+    # ensure that, on the managed hub, the multiclusterengine CR has the managedserviceaccount-preview enabled
+    oc patch multiclusterengine multiclusterengine --type=merge -p '{"spec":{"overrides":{"components":[{"name":"managedserviceaccount-preview","enabled":true}]}}}'
+    echo "multiclusterengine CR patched to enable managedserviceaccount-preview"
+
+    # get the kubeconfig of the managed hub cluster and 
+    # create the secret in the appstudio cluster using the managed hub cluster kubeconfig 
+    # NOTE: this script deploys MCE and AppStudio on the same cluster
+    oc create secret generic hub-kubeconfig --from-file=kubeconfig=$KUBECONFIG -n open-cluster-management
+    echo "created secret hub-kubeconfig from kubeconfig file"
+}
+
+function startClusterRegistrationController() {
+
+    # create the hub config on the AppStudio cluster
+    echo "---
+    apiVersion: singapore.open-cluster-management.io/v1alpha1
+    kind: HubConfig
+    metadata:
+      name: multiclusterhub
+      namespace: cluster-reg-config
+    spec:
+      kubeConfigSecretRef:
+        name: hub-kubeconfig
+    " | oc create -f -
+
+    # create the clusterregistrar on the AppStudio cluster  
+    echo "---
+    apiVersion: singapore.open-cluster-management.io/v1alpha1
+    kind: ClusterRegistrar
+    metadata:
+      name: cluster-reg
+    spec:
+    " | oc create -f -
+    
+    # verify pods are running
+}
+
+function setupManagedCluster(){
+    BASE_DOMAIN=$( oc get ingresses.config/cluster -o jsonpath={.spec.domain} )
+    
+    # create the managed cluster namespace  
+    oc create namespace managed-cluster
+
+    # create the load balancer to expose vcluster's pod
+    echo "---
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: vcluster-loadbalancer
+      namespace: managed-cluster
+    spec:
+      selector:
+        app: vcluster
+        release: vcluster
+      ports:
+        - name: https
+          port: 443
+          targetPort: 8443
+          protocol: TCP
+      type: LoadBalancer
+    " | oc create -f -
+
+    # create the clusterregistrar on the AppStudio cluster  
+    echo "---
+    apiVersion: route.openshift.io/v1
+    kind: Route
+    apiVersion: route.openshift.io/v1
+    metadata:
+      name: vcluster
+      namespace: managed-cluster
+    spec:
+      host: vcluster.$BASE_DOMAIN
+      to:
+        kind: Service
+        name: vcluster-loadbalancer
+        weight: 100
+      port:
+        targetPort: https
+      tls:
+        termination: passthrough
+        insecureEdgeTerminationPolicy: Redirect
+      wildcardPolicy: None
+    " | oc create -f -
+
+    # create the clusterregistrar on the AppStudio cluster  
+    echo "---
+    apiVersion: argoproj.io/v1alpha1
+    kind: Application
+    metadata:
+      name: vcluster
+      namespace: openshift-gitops
+    spec:
+      destination:
+        namespace: managed-cluster
+        server: https://kubernetes.default.svc
+      project: default
+      source:
+        chart: vcluster
+        repoURL: https://charts.loft.sh
+        targetRevision: 0.10.2
+        helm:  
+          values: |
+            syncer:
+              extraArgs:
+                - --tls-san=vcluster.$BASE_DOMAIN
+                - --out-kube-config-server=https://vcluster.$BASE_DOMAIN
+          syncPolicy:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true" | oc create -f -
+
+}
 
 while [[ $# -gt 0 ]]
 do
@@ -75,6 +250,11 @@ do
             addQERemoteForkAndInstallAppstudio
             createApplicationServiceSecrets
             initializeSPIVault
+            setupSandboxOperator
+            setupMCEOperator
+            onboardManagedHubCluster
+            startClusterRegistrationController
+            setupManagedCluster
             ;;
         *)
             ;;
